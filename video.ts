@@ -9,6 +9,10 @@ import { mkdir } from 'fs/promises';
 import { rmdir } from 'fs/promises';
 import { existsSync } from 'fs';
 
+// Constants for video rendering positioning
+const CHUNK_Y_OFFSET = -0.05;
+const CHUNK_X_OFFSET = 0.025;
+
 export async function splitVideoIntoMessageByFrameRate(
   inputPath: string,
   outputDir: string,
@@ -22,9 +26,9 @@ export async function splitVP9VideoIntoFrames(
   outputDir: string,
   frameRate: number,
 ) {
-  // Verify input is VP9 codec and decode frames
-  // FFmpeg will decode VP9 automatically when reading the file
-  // The output is PNG frames, not VP9 encoded output
+  // Decodes VP9 video (or any video format) into PNG frames
+  // FFmpeg automatically detects the input codec (VP9, H.264, etc.)
+  // For strict VP9 validation, use ffprobe to check codec before processing
   await $`ffmpeg -i ${inputPath} -r ${frameRate} ${outputDir}/frame%04d.png`;
 }
 
@@ -362,20 +366,30 @@ export async function processVP9VideoWithChunkMetadata(
     );
 
     // Convert ImageOutput to FrameMetadata with chunk information
+    const totalChunks = result.groupedLines.length;
     const frameMetadata: FrameMetadata = {
       frameIndex,
       width: result.width,
       height: result.height,
-      chunks: result.groupedLines.map((group, chunkIndex) => ({
-        frameIndex,
-        chunkIndex,
-        x: group.x,
-        y: group.y,
-        width: result.width,
-        height: Math.ceil(result.height / result.groupedLines.length),
-        indicator: group.indicator,
-        lineWidth: result.lineWidth,
-      })),
+      chunks: result.groupedLines.map((group, chunkIndex) => {
+        // Calculate chunk height more accurately
+        // The last chunk may have fewer lines if groupLineCount doesn't divide evenly
+        const isLastChunk = chunkIndex === totalChunks - 1;
+        const baseChunkHeight = Math.floor(result.height / totalChunks);
+        const remainingHeight = result.height - (baseChunkHeight * (totalChunks - 1));
+        const chunkHeight = isLastChunk ? remainingHeight : baseChunkHeight;
+        
+        return {
+          frameIndex,
+          chunkIndex,
+          x: group.x,
+          y: group.y,
+          width: result.width,
+          height: chunkHeight,
+          indicator: group.indicator,
+          lineWidth: result.lineWidth,
+        };
+      }),
     };
 
     allFramesMetadata.push(frameMetadata);
@@ -418,17 +432,17 @@ summon minecraft:text_display ~${chunk.x} ~${
       chunk.indicator
     }"],text:'',background: 0x00ffffff,width:20000,line_width:${chunk.lineWidth}}
 summon minecraft:text_display ~${chunk.x} ~${
-      chunk.y - 0.05
+      chunk.y + CHUNK_Y_OFFSET
     } ~ {Tags:["video_frame","${
       chunk.indicator
     }"],text:'',background: 0x00ffffff,width:20000,line_width:${chunk.lineWidth}}
-summon minecraft:text_display ~${chunk.x + 0.025} ~${
+summon minecraft:text_display ~${chunk.x + CHUNK_X_OFFSET} ~${
       chunk.y
     } ~ {Tags:["video_frame","${
       chunk.indicator
     }"],text:'',background: 0x00ffffff,width:20000,line_width:${chunk.lineWidth}}
-summon minecraft:text_display ~${chunk.x + 0.025} ~${
-      chunk.y - 0.05
+summon minecraft:text_display ~${chunk.x + CHUNK_X_OFFSET} ~${
+      chunk.y + CHUNK_Y_OFFSET
     } ~ {Tags:["video_frame","${
       chunk.indicator
     }"],text:'',background: 0x00ffffff,width:20000,line_width:${chunk.lineWidth}}`,
@@ -442,7 +456,7 @@ summon minecraft:text_display ~${chunk.x + 0.025} ~${
     `
 scoreboard players set current_frame video_system 0
 scoreboard players set video_playing video_system 0
-data merge storage video {data:{frameIndex:0}}
+data merge storage video:data {data:{frameIndex:0}}
     `,
   );
 
@@ -462,9 +476,9 @@ schedule function video:run_video ${intervalBetweenFrames}t
     `${functionOutputDir}/run_video_frame.mcfunction`,
     `
 $execute positioned ~ ~ ~ run function video:frames/frame_$(i)_output
-$execute positioned ~ ~-0.05 ~ run function video:frames/frame_$(i)_output
-$execute positioned ~0.025 ~-0.05 ~ run function video:frames/frame_$(i)_output
-$execute positioned ~0.025 ~ ~ run function video:frames/frame_$(i)_output`,
+$execute positioned ~ ~${CHUNK_Y_OFFSET} ~ run function video:frames/frame_$(i)_output
+$execute positioned ~${CHUNK_X_OFFSET} ~${CHUNK_Y_OFFSET} ~ run function video:frames/frame_$(i)_output
+$execute positioned ~${CHUNK_X_OFFSET} ~ ~ run function video:frames/frame_$(i)_output`,
   );
 
   await Bun.write(
