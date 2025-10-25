@@ -41,8 +41,9 @@ if (import.meta.main) {
   const frameRate = <frame_rate>;
   const intervalBetweenFrames = 20 / frameRate;
   const frameResizeFactor = <resize>;
-  // There are two method you can choose to
+  // There are three methods you can choose from:
   
+  // Method 1: Standard video processing
   // await generateVideoFunction(
   //   inputFilePath,
   //   outputDir,
@@ -51,13 +52,26 @@ if (import.meta.main) {
   //   intervalBetweenFrames,
   //   frameResizeFactor,
   // );
-  await generateVideoFunctionWithModify(
+  
+  // Method 2: Video processing with modify
+  // await generateVideoFunctionWithModify(
+  //   inputFilePath,
+  //   outputDir,
+  //   functionOutputDir,
+  //   frameRate,
+  //   intervalBetweenFrames,
+  //   frameResizeFactor,
+  // );
+  
+  // Method 3: VP9 video with chunk metadata (NEW!)
+  await processVP9VideoWithChunkMetadata(
     inputFilePath,
     outputDir,
     functionOutputDir,
     frameRate,
     intervalBetweenFrames,
     frameResizeFactor,
+    100, // groupLineCount
   );
 }
 ```
@@ -70,6 +84,16 @@ If it about 1GB your Minecraft needs at lesat 24GB (In my PC)
 7. Setup scores and entities By `function video:setup_video`
 8. Play it `function video:play_video`
 9. Pause And Reset `function video:pause_video`
+
+### Process VP9 Video with Chunk Metadata (NEW!)
+
+For VP9 videos with detailed chunk position and dimension output, see [VP9_DECODE.md](VP9_DECODE.md) for detailed documentation.
+
+This new method:
+- Decodes VP9 videos specifically with the VP9 codec
+- Generates JSON metadata with position (x, y) and dimensions (width, height) for each chunk
+- Outputs chunk information for efficient Minecraft rendering
+- Creates text_display entities with background colors for chunk-based rendering
 
 * The reason why don't use `/reload` to update datapacks is due to it always make game crash or out of memory in my PC, so that I don't recommend.
 
