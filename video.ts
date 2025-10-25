@@ -456,7 +456,7 @@ summon minecraft:text_display ~${chunk.x + CHUNK_X_OFFSET} ~${
     `
 scoreboard players set current_frame video_system 0
 scoreboard players set video_playing video_system 0
-data merge storage video:data {data:{frameIndex:0}}
+data merge storage video {data:{frameIndex:0}}
     `,
   );
 
