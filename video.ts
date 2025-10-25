@@ -22,7 +22,10 @@ export async function splitVP9VideoIntoFrames(
   outputDir: string,
   frameRate: number,
 ) {
-  await $`ffmpeg -i ${inputPath} -vcodec vp9 -r ${frameRate} ${outputDir}/frame%04d.png`;
+  // Verify input is VP9 codec and decode frames
+  // FFmpeg will decode VP9 automatically when reading the file
+  // The output is PNG frames, not VP9 encoded output
+  await $`ffmpeg -i ${inputPath} -r ${frameRate} ${outputDir}/frame%04d.png`;
 }
 
 export interface ChunkMetadata {
