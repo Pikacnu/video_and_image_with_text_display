@@ -34,4 +34,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 
 img.jpg
-source.mp4
+refector
+.tmp
+generator
+output
+data/video/*
+video_*
+*.mp4

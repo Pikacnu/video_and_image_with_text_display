@@ -24,6 +24,7 @@ async function generateVideoFunction(
   frameRate: number,
   intervalBetweenFrames: number,
   frameResizeFactor: number,
+  VideoModifyFactor = 1,
 ) {
   if (existsSync(`${outputDir}/function`)) {
     await rmdir(`${outputDir}/function`, { recursive: true });
@@ -44,14 +45,19 @@ async function generateVideoFunction(
   const files = Array.from(scanner.scanSync(`${outputDir}/frames`));
   let frameIndex = 0;
   let functionFiles: string[] = [];
-  for (const file of files.slice(0, Math.floor(files.length / 1))) {
+  for (const file of files.slice(
+    0,
+    Math.floor(files.length * VideoModifyFactor),
+  )) {
     const filePath = `${outputDir}/frames/${file}`;
-    await processImage(
+    await processImageWithLineCombinations(
       filePath,
       `${outputDir}/function/frames/`,
       frameResizeFactor,
+      100,
       false,
       `frame_${frameIndex}_`,
+      50,
     );
     functionFiles.push(`frame_${frameIndex}_output.mcfunction`);
     frameIndex++;
@@ -84,7 +90,7 @@ kill @e[type=text_display,tag=video_frame]
     `${functionOutputDir}/run_video.mcfunction`,
     `
 scoreboard players add @e[type=text_display,tag=video_frame] video_cache 1
-execute as @e[type=text_display,tag=video_frame,scores={video_cache=3}] run kill @s
+execute as @e[type=text_display,tag=video_frame,scores={video_cache=2}] run kill @s
 execute as @e[type=minecraft:text_display,tag=video_frame] at @s run tp @s ^ ^ ^-.01
 execute if score current_frame video_system >= last_frame video_system run scoreboard players set video_playing video_system 0
 execute if score video_playing video_system matches 0 run return run function video:reset_video
@@ -116,6 +122,13 @@ function video:run_video
 scoreboard players set video_playing video_system 0
 `,
   );
+  await Bun.write(
+    `${functionOutputDir}/run_frame.mcfunction`,
+    `$function video:run_video_frame {frameIndex:$(i)}
+$execute positioned ~ ~-0.05 ~ run function video:run_video_frame {frameIndex:$(i)}
+$execute positioned ~0.025 ~-0.05 ~ run function video:run_video_frame {frameIndex:$(i)}
+$execute positioned ~0.025 ~ ~ run function video:run_video_frame {frameIndex:$(i)}`,
+  );
 
   for (const filePath of files) {
     await Bun.file(`${outputDir}/frames/${filePath}`).delete();
@@ -129,6 +142,7 @@ async function generateVideoFunctionWithModify(
   frameRate: number,
   intervalBetweenFrames: number,
   frameResizeFactor: number,
+  VideoModifyFactor = 1,
 ) {
   if (existsSync(`${outputDir}/function`)) {
     await rmdir(`${outputDir}/function`, { recursive: true });
@@ -150,7 +164,10 @@ async function generateVideoFunctionWithModify(
   let frameIndex = 0;
   let fileData: ImageOutput[] = [];
 
-  for (const file of files.slice(0, Math.floor(files.length / 1))) {
+  for (const file of files.slice(
+    0,
+    Math.floor(files.length * VideoModifyFactor),
+  )) {
     const filePath = `${outputDir}/frames/${file}`;
     const result = await processImageWithCombinedLinesAndJsonOutput(
       filePath,
@@ -236,17 +253,16 @@ execute if score video_playing video_system matches 0 run return run function vi
 scoreboard players add current_frame video_system 1
 execute store result storage video:data data.frameIndex int 1 run scoreboard players get current_frame video_system
 function video:run_video_frame with storage video:data data
-execute positioned ~ ~-0.05 ~ run function video:run_video_frame with storage video:data data
-execute positioned ~0.025 ~-0.05 ~ run function video:run_video_frame with storage video:data data
-execute positioned ~0.025 ~ ~ run function video:run_video_frame with storage video:data data
 schedule function video:run_video ${intervalBetweenFrames}t
 `,
   );
   await Bun.write(
     `${functionOutputDir}/run_video_frame.mcfunction`,
     `
-$function video:frames/frame_$(frameIndex)_output
-    `,
+$execute positioned ~ ~ ~ run function video:frames/frame_$(i)_output
+$execute positioned ~ ~-0.05 ~ run function video:frames/frame_$(i)_output
+$execute positioned ~0.025 ~-0.05 ~ run function video:frames/frame_$(i)_output
+$execute positioned ~0.025 ~ ~ run function video:frames/frame_$(i)_output`,
   );
   await Bun.write(
     `${functionOutputDir}/play_video.mcfunction`,
@@ -268,12 +284,13 @@ scoreboard players set video_playing video_system 0
 }
 
 if (import.meta.main) {
-  const inputFilePath = './source.mp4';
+  const inputFilePath = './BGM_744326.mp4';
   const outputDir = './data/video';
   const functionOutputDir = `${outputDir}/function`;
   const frameRate = 10;
   const intervalBetweenFrames = 20 / frameRate;
-  const frameResizeFactor = 0.1;
+  const frameResizeFactor = 0.34;
+  const VideoModifyFactor = 1;
   await generateVideoFunction(
     inputFilePath,
     outputDir,
@@ -281,13 +298,15 @@ if (import.meta.main) {
     frameRate,
     intervalBetweenFrames,
     frameResizeFactor,
+    VideoModifyFactor,
   );
   // await generateVideoFunctionWithModify(
-  //   inputFilePath,
-  //   outputDir,
-  //   functionOutputDir,
-  //   frameRate,
-  //   intervalBetweenFrames,
-  //   frameResizeFactor,
+  // inputFilePath,
+  // outputDir,
+  // functionOutputDir,
+  // frameRate,
+  // intervalBetweenFrames,
+  // frameResizeFactor,
+  // VideoModifyFactor,
   // );
 }

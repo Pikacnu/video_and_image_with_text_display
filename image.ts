@@ -27,6 +27,8 @@ const commandTemplate =
   '0x00ffffff' +
   ',width:20000,line_width:@lineWidth@}';
 const chunkTemplate = '{text:"@text@",color:"@color@"},';
+const bigChunkTemplate = '{text:"",color:"@color@",extra:[@inner@]},';
+const chunkEntryTemplate = '{text:"@text@"@color@},';
 const lineHeight = 0.2;
 const blockLeading = 0.025;
 const withPaddingLineHeight = 0.25;
@@ -36,8 +38,10 @@ export async function processImageWithLineCombinations(
   imagePath: string,
   outputDir: string,
   resizeFactor: number,
+  groupLineCount: number,
   isGenerateWithLineCombinations = false,
   prefix = '',
+  BlockGroupThreshold = 150,
 ) {
   const image = await loadImage(await Bun.file(imagePath).arrayBuffer());
   const resizedWidth = Math.floor(image.width * resizeFactor);
@@ -74,10 +78,6 @@ export async function processImageWithLineCombinations(
 
   let lines: string[] = [];
 
-  let maxLineLength = 0;
-
-  // Grouped Output
-  const groupLineCount = 100;
   const pixelsGroupedByMultipleLines: Array<Pixel>[] = Array.from(
     { length: Math.ceil(PixelsByLine.length / groupLineCount) },
     () => [],
@@ -101,87 +101,140 @@ export async function processImageWithLineCombinations(
     let textContent = '';
 
     const linePixels = pixelsGroupedByMultipleLines[i]!;
-    // console.log(
-    //   `Processing grouped line ${i} with ${linePixels.length} pixels | ${
-    //     linePixels.length / groupLineCount
-    //   } per line`,
-    // );
+
     const pixelsMergedByColor = mergedPixels(linePixels);
-    let tempLength = 0;
-    for (let j = 0; j < pixelsMergedByColor.length; j++) {
-      const currentChunk = pixelsMergedByColor[j]!;
-      const firstPixel = currentChunk[0]!;
-      const colorHex = (
-        (firstPixel.r << 16) |
-        (firstPixel.g << 8) |
-        firstPixel.b
-      )
-        .toString(16)
-        .padStart(6, '0');
-      textContent += chunkTemplate
-        .replace('@color@', `#${colorHex.toLowerCase()}`)
-        .replace('@text@', '█'.repeat(currentChunk.length));
-      tempLength += currentChunk.length;
+    // CombinedWithColorChunksByCheckCountOfColorInTheRange
+    const [, combinedChunks] = pixelsMergedByColor.reduce(
+      (source, currentChunk, index) => {
+        const colorTableMap = source[0]!;
+        const cacheArray = source[2]!;
+        currentChunk.forEach((pixel) => {
+          const colorHex = ((pixel.r << 16) | (pixel.g << 8) | pixel.b)
+            .toString(16)
+            .padStart(6, '0');
+          source[0]!.set(
+            `#${colorHex.toLowerCase()}`,
+            (source[0]!.get(`#${colorHex.toLowerCase()}`) ?? 0) + 1,
+          );
+        });
+        let target = '';
+        for (const [color, count] of colorTableMap.entries()) {
+          if (count >= BlockGroupThreshold) {
+            target = color;
+            break;
+          }
+        }
+        if (target !== '') {
+          cacheArray.push(currentChunk);
+          const flattenedCache = cacheArray.flat();
+          if (flattenedCache.length > 0) {
+            source[1]!.push([target, flattenedCache]);
+          }
+          source[0] = new Map();
+          source[2] = [];
+        } else {
+          source[2].push(currentChunk);
+        }
+        if (index === pixelsMergedByColor.length - 1 && source[2]!.length > 0) {
+          let maxColor = '';
+          let maxCount = 0;
+          source[0]!.forEach((count, color) => {
+            if (count > maxCount) {
+              maxCount = count;
+              maxColor = color;
+            }
+          });
+          const flattenedCache = source[2]!.flat();
+          if (flattenedCache.length > 0 && maxColor) {
+            source[1]!.push([maxColor, flattenedCache]);
+          }
+        }
+        return source;
+      },
+      [new Map(), [], []] as [
+        Map<string, number>,
+        Array<[string, Pixel[]]>,
+        Array<Pixel[]>,
+      ],
+    );
+
+    for (let j = 0; j < combinedChunks.length; j++) {
+      const [color, pixelChunk] = combinedChunks[j]!;
+      textContent += bigChunkTemplate
+        .replace('@color@', color)
+        .replace('@inner@', () => {
+          let innerText = '';
+          const mergedInnerPixels = mergedPixels(pixelChunk);
+          for (let k = 0; k < mergedInnerPixels.length; k++) {
+            const currentInnerChunk = mergedInnerPixels[k]!;
+            const firstPixel = currentInnerChunk[0]!;
+            const colorHex = (
+              (firstPixel.r << 16) |
+              (firstPixel.g << 8) |
+              firstPixel.b
+            )
+              .toString(16)
+              .padStart(6, '0');
+            innerText += chunkEntryTemplate
+              .replace(
+                '@color@',
+                color === `#${colorHex.toLowerCase()}`
+                  ? ``
+                  : `,color:"#${colorHex.toLowerCase()}"`,
+              )
+              .replace('@text@', '█'.repeat(currentInnerChunk.length));
+          }
+          return innerText.length > 0 ? innerText.slice(0, -1) : ''; // Remove last comma
+        });
     }
+
+    textContent = textContent.length > 0 ? textContent.slice(0, -1) : ''; // Remove last comma
+
     const currentLineCommand = commandTemplate
       .replace('@text@', textContent)
       .replace('@lineWidth@', (resizedWidth * widthNeededPerBlock).toString());
     if (isGenerateWithLineCombinations) {
+      const baseY =
+        groupLineCount *
+          withPaddingLineHeight *
+          (pixelsGroupedByMultipleLines.length - i - 1) +
+        (i === pixelsGroupedByMultipleLines.length - 1
+          ? lastChunkBottomPaddingLines * withPaddingLineHeight
+          : 0);
+
       const filledVertical =
-        currentLineCommand.replace(
-          '@posY@',
-          (
-            groupLineCount *
-              withPaddingLineHeight *
-              (pixelsGroupedByMultipleLines.length - i - 1) +
-            (i === pixelsGroupedByMultipleLines.length - 1
-              ? lastChunkBottomPaddingLines * withPaddingLineHeight
-              : 0)
-          ).toString(),
-        ) +
+        currentLineCommand.replace('@posY@', baseY.toString()) +
         '\n' +
         currentLineCommand.replace(
           '@posY@',
-          (
-            groupLineCount *
-              withPaddingLineHeight *
-              (pixelsGroupedByMultipleLines.length - i - 1) -
-            blockLeading * 2 +
-            (i === pixelsGroupedByMultipleLines.length - 1
-              ? lastChunkBottomPaddingLines * withPaddingLineHeight
-              : 0)
-          ).toString(),
+          (baseY + groupLineCount * withPaddingLineHeight).toString(),
         ) +
         '\n';
+
       lines.push(
         filledVertical.replaceAll('@posX@', '0'),
         filledVertical.replaceAll('@posX@', blockLeading.toString()),
       );
     } else {
+      const posY =
+        groupLineCount *
+          withPaddingLineHeight *
+          (pixelsGroupedByMultipleLines.length - i - 1) +
+        (i === pixelsGroupedByMultipleLines.length - 1
+          ? lastChunkBottomPaddingLines * withPaddingLineHeight
+          : 0);
+
       lines.push(
         currentLineCommand
-          .replaceAll(
-            '@posY@',
-            (
-              groupLineCount *
-                lineHeight *
-                (pixelsGroupedByMultipleLines.length - i - 1) +
-              (i === pixelsGroupedByMultipleLines.length - 1
-                ? lastChunkBottomPaddingLines * lineHeight
-                : 0)
-            ).toString(),
-          )
+          .replaceAll('@posY@', posY.toString())
           .replaceAll('@posX@', '0') + '\n',
       );
     }
-
-    maxLineLength = Math.max(maxLineLength, currentLineCommand.length);
   }
   /*
 .replace('@posX@', '0')
 */
 
-  maxLineLength = 0;
   // console.log(`Resized Width: ${resizedWidth}, Resized Height: ${resizedHeight}`);
   await Bun.write(`${outputDir}${prefix}output.mcfunction`, lines.join(''));
 }
@@ -397,6 +450,6 @@ export async function processImageWithCombinedLinesAndJsonOutput(
 
 if (import.meta.main) {
   const outputDir = './data/display/function/';
-  await processImageWithLineCombinations('./img.jpg', outputDir, 0.1);
+  await processImageWithLineCombinations('./img.jpg', outputDir, 0.1, 100);
   //await processImage('./img.jpg', outputDir, 0.1);
 }
