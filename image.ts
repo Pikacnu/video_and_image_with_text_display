@@ -9,6 +9,7 @@ import {
   widthNeededPerBlock,
   lineHeight,
   chunkTemplate,
+  bgColorUpdateCommandTemplate,
 } from './utils.ts';
 
 export type Pixel = { r: number; g: number; b: number; a: number };
@@ -71,6 +72,8 @@ export type ImageProcessOptions = {
   colorSize?: ColorSize;
   outputResizeFactor?: number;
   isUsingDataMergeCommand?: boolean;
+  isBackgroundTransparent?: boolean;
+  isUsingResourcePackFont?: boolean;
 };
 
 export async function processImageWithLineCombinations(
@@ -78,7 +81,7 @@ export async function processImageWithLineCombinations(
   outputDir: string,
   options: ImageProcessOptions,
   prefix = '',
-): Promise<void | [string, [number, number]][]> {
+): Promise<void | [string, [number, number], number, string][]> {
   const {
     resizeFactor = 1,
     groupLineCount = 50,
@@ -87,6 +90,8 @@ export async function processImageWithLineCombinations(
     colorSize = ColorSize._256,
     outputResizeFactor = 1,
     isUsingDataMergeCommand = false,
+    isBackgroundTransparent = true,
+    isUsingResourcePackFont = false,
   } = options;
 
   if (isGenerateWithLineCombinations && isUsingDataMergeCommand) {
@@ -149,7 +154,7 @@ export async function processImageWithLineCombinations(
       ? 0
       : groupLineCount - (PixelsByLine.length % groupLineCount);
 
-  let entityData = [] as [string, [number, number]][];
+  let entityData = [] as [string, [number, number], string][];
 
   for (let i = 0; i < pixelsGroupedByMultipleLines.length; i++) {
     let textContent = '';
@@ -157,6 +162,7 @@ export async function processImageWithLineCombinations(
     const linePixels = pixelsGroupedByMultipleLines[i]!;
 
     const pixelsMergedByColor = mergedPixels(linePixels, blockGroupThreshold);
+    const currentChunkColorMap = new Map<string, number>();
     // CombinedWithColorChunksByCheckCountOfColorInTheRange
     const [, combinedChunks] = pixelsMergedByColor.reduce(
       (source, currentChunk, index) => {
@@ -169,6 +175,10 @@ export async function processImageWithLineCombinations(
           source[0]!.set(
             `#${colorHex.toLowerCase()}`,
             (source[0]!.get(`#${colorHex.toLowerCase()}`) ?? 0) + 1,
+          );
+          currentChunkColorMap.set(
+            colorHex,
+            (currentChunkColorMap.get(colorHex) ?? 0) + 1,
           );
         });
         let target = '';
@@ -250,21 +260,26 @@ export async function processImageWithLineCombinations(
     textContent = textContent.length > 0 ? textContent.slice(0, -1) : ''; // Remove last comma
 
     const currentLineCommandTemp = !isUsingDataMergeCommand
-      ? commandTemplate
-          .replace('@text@', textContent)
-          .replace(
-            '@lineWidth@',
-            (resizedWidth * widthNeededPerBlock).toString(),
-          )
+      ? commandTemplate.replace('@text@', textContent).replace(
+          '@lineWidth@',
+          (isUsingResourcePackFont
+            ? 11 + 1
+            : widthNeededPerBlock
+          ) /*widthNeededPerBlock*/
+            .toString(),
+        )
       : dataMergeCommandTemplate
           .replace('@text@', textContent)
           .replace('@tag@', `video_frame_target_${i}`);
-    const currentLineCommand = `${currentLineCommandTemp.slice(
-      0,
-      -1,
-    )},scale:[${outputResizeFactor.toFixed(2)}f,${outputResizeFactor.toFixed(
-      2,
-    )},1f]}`;
+
+    const mostAppearedColor = Array.from(currentChunkColorMap.entries()).reduce(
+      (a, b) => (a[1] >= b[1] ? a : b),
+      ['', 0],
+    )[0];
+    const currentLineCommand = currentLineCommandTemp.replace(
+      '@bgColor@',
+      isBackgroundTransparent ? '0x00ffffff' : `0xff${mostAppearedColor}`,
+    );
     if (isGenerateWithLineCombinations) {
       const baseY =
         groupLineCount *
@@ -290,6 +305,20 @@ export async function processImageWithLineCombinations(
         filledVertical.replaceAll('@posX@', '0'),
         filledVertical.replaceAll('@posX@', blockLeading.toString()),
       );
+      if (isUsingDataMergeCommand) {
+        entityData.push([
+          `video_frame_target_${i}`,
+          [0, baseY],
+          mostAppearedColor,
+        ]);
+        if (isBackgroundTransparent) {
+          lines.push(
+            bgColorUpdateCommandTemplate
+              .replace('@tag@', `video_frame_target_${i}`)
+              .replace('@bgColor@', `0xff${mostAppearedColor}`) + '\n',
+          );
+        }
+      }
     } else {
       const posY =
         groupLineCount *
@@ -305,7 +334,18 @@ export async function processImageWithLineCombinations(
           .replaceAll('@posX@', '0') + '\n',
       );
       if (isUsingDataMergeCommand) {
-        entityData.push([`video_frame_target_${i}`, [0, posY]]);
+        entityData.push([
+          `video_frame_target_${i}`,
+          [0, posY],
+          mostAppearedColor,
+        ]);
+        if (isBackgroundTransparent) {
+          lines.push(
+            bgColorUpdateCommandTemplate
+              .replace('@tag@', `video_frame_target_${i}`)
+              .replace('@bgColor@', `0xff${mostAppearedColor}`) + '\n',
+          );
+        }
       }
     }
   }
@@ -316,7 +356,12 @@ export async function processImageWithLineCombinations(
   // console.log(`Resized Width: ${resizedWidth}, Resized Height: ${resizedHeight}`);
   await Bun.write(`${outputDir}${prefix}output.mcfunction`, lines.join(''));
   if (isUsingDataMergeCommand) {
-    return entityData;
+    return entityData.map((item) => [
+      item[0],
+      [item[1][0], item[1][1]],
+      resizedWidth * (isUsingResourcePackFont ? 11 + 1 : widthNeededPerBlock),
+      isBackgroundTransparent ? '0x00ffffff' : `0xff${item[2]}`,
+    ]);
   }
 }
 

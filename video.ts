@@ -73,7 +73,12 @@ async function generateVideoFunction(
   const files = Array.from(scanner.scanSync(`${outputDir}/frames`));
   let frameIndex = 0;
   let functionFiles: string[] = [];
-  const imageProcessOpts = imageProcessOptions || {
+  const imageProcessOpts = Object.assign(
+    {
+      resizeFactor: frameResizeFactor,
+    },
+    imageProcessOptions,
+  ) || {
     resizeFactor: frameResizeFactor,
     groupLineCount: 50,
     isGenerateWithLineCombinations: false,
@@ -90,7 +95,9 @@ async function generateVideoFunction(
       .replaceAll('"', '')}`,
   );
   console.time('Processing frames into functions');
-  let entityDataList: [string, [number, number]][] = [];
+  let entityDataList: Awaited<
+    ReturnType<typeof processImageWithLineCombinations>
+  > = [];
   for (const file of files.slice(
     0,
     Math.floor(files.length * VideoModifyFactor),
@@ -129,23 +136,23 @@ ${
   !isUsingDataMergeCommand
     ? ''
     : entityDataList
-        .map(([tag, [x, y]]) => {
+        .map(([tag, [x, y], lineWidth, bgColor]) => {
           if (isFillGaps) {
-            return `summon minecraft:text_display ~${x} ~${y} ~ {Tags:["video_frame","${tag}"],text:'',background: 0x00ffffff,width:20000,line_width:200}
+            return `summon minecraft:text_display ~${x} ~${y} ~ {Tags:["video_frame","${tag}"],text:'',background: ${bgColor},width:${lineWidth},line_width:${lineWidth}}
 summon minecraft:text_display ~${x} ~${
               y - 0.05
-            } ~ {Tags:["video_frame","${tag}"],text:'',background: 0x00ffffff,width:20000,line_width:200}
+            } ~ {Tags:["video_frame","${tag}"],text:'',background: ${bgColor},width:${lineWidth},line_width:${lineWidth}}
 summon minecraft:text_display ~${
               x + 0.025
-            } ~${y} ~ {Tags:["video_frame","${tag}"],text:'',background: 0x00ffffff,width:20000,line_width:200}
+            } ~${y} ~ {Tags:["video_frame","${tag}"],text:'',background: ${bgColor},width:${lineWidth},line_width:${lineWidth}}
 summon minecraft:text_display ~${x + 0.025} ~${
               y - 0.05
-            } ~ {Tags:["video_frame","${tag}"],text:'',background: 0x00ffffff,width:20000,line_width:200}`;
+            } ~ {Tags:["video_frame","${tag}"],text:'',background: ${bgColor},width:${lineWidth},line_width:${lineWidth}}`;
           }
-          return `summon minecraft:text_display ~${x} ~${y} ~ {Tags:["video_frame","${tag}"],text:'',background: 0x00ffffff,width:20000,line_width:200}`;
+          return `summon minecraft:text_display ~${x} ~${y} ~ {Tags:["video_frame","${tag}"],text:'',background: ${bgColor},width:${lineWidth},line_width:${lineWidth}}`;
         })
         .join('\n')
-})}
+}
 `,
   );
 
@@ -155,16 +162,19 @@ summon minecraft:text_display ~${x + 0.025} ~${
 scoreboard players set current_frame video_system 0
 scoreboard players set video_playing video_system 0
 data merge storage video {data:{frameIndex:0}}
-kill @e[type=text_display,tag=video_frame]
+${!isUsingDataMergeCommand ? `kill @e[type=text_display,tag=video_frame]` : ''}
     `,
   );
 
   await Bun.write(
     `${functionOutputDir}/run_video.mcfunction`,
-    `
-scoreboard players add @e[type=text_display,tag=video_frame] video_cache 1
+    `${
+      isUsingDataMergeCommand
+        ? ''
+        : `scoreboard players add @e[type=text_display,tag=video_frame] video_cache 1
 execute as @e[type=text_display,tag=video_frame,scores={video_cache=2}] run kill @s
-execute as @e[type=minecraft:text_display,tag=video_frame] at @s run tp @s ^ ^ ^-.01
+execute as @e[type=minecraft:text_display,tag=video_frame] at @s run tp @s ^ ^ ^-.01`
+    }
 execute if score current_frame video_system >= last_frame video_system run scoreboard players set video_playing video_system 0
 execute if score video_playing video_system matches 0 run return run function video:reset_video
 scoreboard players add current_frame video_system 1
@@ -361,12 +371,12 @@ scoreboard players set video_playing video_system 0
 }
 
 if (import.meta.main) {
-  const inputFilePath = './bad-apple.mp4';
+  const inputFilePath = './BGM_744326.mp4';
   const outputDir = './data/video';
   const functionOutputDir = `${outputDir}/function`;
-  const frameRate = 4;
+  const frameRate = 20;
   const intervalBetweenFrames = 20 / frameRate;
-  const frameResizeFactor = 0.05;
+  const frameResizeFactor = 0.3;
   const VideoModifyFactor = 1;
   await generateVideoFunction(
     inputFilePath,
@@ -377,14 +387,16 @@ if (import.meta.main) {
       intervalBetweenFrames,
       frameResizeFactor,
       VideoModifyFactor,
-      isFillGaps: false,
+      isFillGaps: true,
     },
     {
-      groupLineCount: 100,
+      groupLineCount: 20,
       isGenerateWithLineCombinations: false,
       blockGroupThreshold: 200,
       colorSize: ColorSize._256,
-      outputResizeFactor: 0.05,
+      isUsingDataMergeCommand: true,
+      isBackgroundTransparent: true,
+      isUsingResourcePackFont: false,
     },
   );
   // await generateVideoFunctionWithModify(

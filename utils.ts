@@ -1,9 +1,9 @@
 export const commandTemplate =
-  'summon minecraft:text_display ~@posX@ ~@posY@ ~ {Tags:["video_frame"],text:[@text@],background:' +
-  '0x00ffffff' +
-  ',width:20000,line_width:@lineWidth@}';
+  'summon minecraft:text_display ~@posX@ ~@posY@ ~ {Tags:["video_frame"],text:[@text@],background: @bgColor@ ,width:20000,line_width:@lineWidth@}';
 export const dataMergeCommandTemplate =
-  'data modify entity @e[type=minecraft:text_display,tag=video_frame,tag=@tag@,limit=1,sort=nearest] text set value [@text@]';
+  'execute as @e[type=minecraft:text_display,tag=video_frame,tag=@tag@] run data modify entity @s text set value [@text@]';
+export const bgColorUpdateCommandTemplate =
+  'execute as @e[type=minecraft:text_display,tag=video_frame,tag=@tag@] run data modify entity @s background set value @bgColor@';
 export const chunkTemplate = '{text:"@text@",color:"@color@"},';
 export const bigChunkTemplate = '{text:"",color:"@color@",extra:[@inner@]},';
 export const chunkEntryTemplate = '{text:"@text@"@color@},';
