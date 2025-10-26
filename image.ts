@@ -2,7 +2,10 @@ import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 export type Pixel = { r: number; g: number; b: number; a: number };
 
-const mergedPixels = (pixels: Pixel[]): Array<Pixel[]> =>
+const mergedPixels = (
+  pixels: Pixel[],
+  maxChunkLength = 2 ** 15 - 1,
+): Array<Pixel[]> =>
   pixels.reduce((acc: Array<Pixel[]>, pixel) => {
     if (acc.length === 0) {
       acc.push([pixel]);
@@ -10,6 +13,10 @@ const mergedPixels = (pixels: Pixel[]): Array<Pixel[]> =>
     }
     const lastGroup = acc[acc.length - 1]!;
     const lastPixel = lastGroup[0]!;
+    if (lastGroup.length >= maxChunkLength) {
+      acc.push([pixel]);
+      return acc;
+    }
     if (
       lastPixel.r === pixel.r &&
       lastPixel.g === pixel.g &&

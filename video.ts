@@ -54,14 +54,15 @@ async function generateVideoFunction(
       filePath,
       `${outputDir}/function/frames/`,
       frameResizeFactor,
-      100,
+      50,
       false,
       `frame_${frameIndex}_`,
-      50,
+      100,
     );
     functionFiles.push(`frame_${frameIndex}_output.mcfunction`);
     frameIndex++;
   }
+  rmdir(`${outputDir}/frames`, { recursive: true });
 
   const lastFrameIndex = frameIndex - 1;
   await Bun.write(
@@ -129,10 +130,6 @@ $execute positioned ~ ~-0.05 ~ run function video:run_video_frame {frameIndex:$(
 $execute positioned ~0.025 ~-0.05 ~ run function video:run_video_frame {frameIndex:$(i)}
 $execute positioned ~0.025 ~ ~ run function video:run_video_frame {frameIndex:$(i)}`,
   );
-
-  for (const filePath of files) {
-    await Bun.file(`${outputDir}/frames/${filePath}`).delete();
-  }
 }
 
 async function generateVideoFunctionWithModify(
@@ -284,12 +281,12 @@ scoreboard players set video_playing video_system 0
 }
 
 if (import.meta.main) {
-  const inputFilePath = './BGM_744326.mp4';
+  const inputFilePath = './bad-apple.mp4';
   const outputDir = './data/video';
   const functionOutputDir = `${outputDir}/function`;
   const frameRate = 10;
   const intervalBetweenFrames = 20 / frameRate;
-  const frameResizeFactor = 0.34;
+  const frameResizeFactor = 0.5;
   const VideoModifyFactor = 1;
   await generateVideoFunction(
     inputFilePath,
