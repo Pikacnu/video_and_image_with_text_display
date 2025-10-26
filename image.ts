@@ -1,4 +1,15 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import {
+  bigChunkTemplate,
+  chunkEntryTemplate,
+  commandTemplate,
+  dataMergeCommandTemplate,
+  blockLeading,
+  withPaddingLineHeight,
+  widthNeededPerBlock,
+  lineHeight,
+  chunkTemplate,
+} from './utils.ts';
 
 export type Pixel = { r: number; g: number; b: number; a: number };
 
@@ -52,18 +63,6 @@ const mergedPixels = (
     return acc;
   }, [] as Array<Pixel[]>);
 
-const commandTemplate =
-  'summon minecraft:text_display ~@posX@ ~@posY@ ~ {Tags:["video_frame"],text:[@text@],background:' +
-  '0x00ffffff' +
-  ',width:20000,line_width:@lineWidth@}';
-const chunkTemplate = '{text:"@text@",color:"@color@"},';
-const bigChunkTemplate = '{text:"",color:"@color@",extra:[@inner@]},';
-const chunkEntryTemplate = '{text:"@text@"@color@},';
-const lineHeight = 0.2;
-const blockLeading = 0.025;
-const withPaddingLineHeight = 0.25;
-const widthNeededPerBlock = 9;
-
 export type ImageProcessOptions = {
   resizeFactor?: number;
   groupLineCount?: number;
@@ -71,6 +70,7 @@ export type ImageProcessOptions = {
   blockGroupThreshold?: number;
   colorSize?: ColorSize;
   outputResizeFactor?: number;
+  isUsingDataMergeCommand?: boolean;
 };
 
 export async function processImageWithLineCombinations(
@@ -78,7 +78,7 @@ export async function processImageWithLineCombinations(
   outputDir: string,
   options: ImageProcessOptions,
   prefix = '',
-) {
+): Promise<void | [string, [number, number]][]> {
   const {
     resizeFactor = 1,
     groupLineCount = 50,
@@ -86,7 +86,15 @@ export async function processImageWithLineCombinations(
     blockGroupThreshold = 100,
     colorSize = ColorSize._256,
     outputResizeFactor = 1,
+    isUsingDataMergeCommand = false,
   } = options;
+
+  if (isGenerateWithLineCombinations && isUsingDataMergeCommand) {
+    throw new Error(
+      'isGenerateWithLineCombinations and isUsingDataMergeCommand NOT supported together.',
+    );
+  }
+
   const image = await loadImage(await Bun.file(imagePath).arrayBuffer());
   const resizedWidth = Math.floor(image.width * resizeFactor);
   const resizedHeight = Math.floor(image.height * resizeFactor);
@@ -140,6 +148,8 @@ export async function processImageWithLineCombinations(
     PixelsByLine.length % groupLineCount === 0
       ? 0
       : groupLineCount - (PixelsByLine.length % groupLineCount);
+
+  let entityData = [] as [string, [number, number]][];
 
   for (let i = 0; i < pixelsGroupedByMultipleLines.length; i++) {
     let textContent = '';
@@ -239,9 +249,16 @@ export async function processImageWithLineCombinations(
 
     textContent = textContent.length > 0 ? textContent.slice(0, -1) : ''; // Remove last comma
 
-    const currentLineCommandTemp = commandTemplate
-      .replace('@text@', textContent)
-      .replace('@lineWidth@', (resizedWidth * widthNeededPerBlock).toString());
+    const currentLineCommandTemp = !isUsingDataMergeCommand
+      ? commandTemplate
+          .replace('@text@', textContent)
+          .replace(
+            '@lineWidth@',
+            (resizedWidth * widthNeededPerBlock).toString(),
+          )
+      : dataMergeCommandTemplate
+          .replace('@text@', textContent)
+          .replace('@tag@', `video_frame_target_${i}`);
     const currentLineCommand = `${currentLineCommandTemp.slice(
       0,
       -1,
@@ -287,6 +304,9 @@ export async function processImageWithLineCombinations(
           .replaceAll('@posY@', posY.toString())
           .replaceAll('@posX@', '0') + '\n',
       );
+      if (isUsingDataMergeCommand) {
+        entityData.push([`video_frame_target_${i}`, [0, posY]]);
+      }
     }
   }
   /*
@@ -295,89 +315,92 @@ export async function processImageWithLineCombinations(
 
   // console.log(`Resized Width: ${resizedWidth}, Resized Height: ${resizedHeight}`);
   await Bun.write(`${outputDir}${prefix}output.mcfunction`, lines.join(''));
+  if (isUsingDataMergeCommand) {
+    return entityData;
+  }
 }
 
-export async function processImage(
-  imagePath: string,
-  outputDir: string,
-  resizeFactor: number,
-  isGenerateWithLineCombinations = false,
-  prefix = '',
-) {
-  const image = await loadImage(await Bun.file(imagePath).arrayBuffer());
+// export async function processImage(
+//   imagePath: string,
+//   outputDir: string,
+//   resizeFactor: number,
+//   isGenerateWithLineCombinations = false,
+//   prefix = '',
+// ) {
+//   const image = await loadImage(await Bun.file(imagePath).arrayBuffer());
 
-  const resizedWidth = Math.floor(image.width * resizeFactor);
-  const resizedHeight = Math.floor(image.height * resizeFactor);
+//   const resizedWidth = Math.floor(image.width * resizeFactor);
+//   const resizedHeight = Math.floor(image.height * resizeFactor);
 
-  const canvas = createCanvas(resizedWidth, resizedHeight);
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(image, 0, 0, resizedWidth, resizedHeight);
-  const colorData = ctx.getImageData(0, 0, resizedWidth, resizedHeight).data;
-  let pixels: Pixel[] = [];
+//   const canvas = createCanvas(resizedWidth, resizedHeight);
+//   const ctx = canvas.getContext('2d');
+//   ctx.drawImage(image, 0, 0, resizedWidth, resizedHeight);
+//   const colorData = ctx.getImageData(0, 0, resizedWidth, resizedHeight).data;
+//   let pixels: Pixel[] = [];
 
-  for (let i = 0; i < colorData.length; i += 4) {
-    const r = colorData[i];
-    const g = colorData[i + 1];
-    const b = colorData[i + 2];
-    const a = colorData[i + 3];
-    pixels.push({ r, g, b, a } as Pixel);
-  }
+//   for (let i = 0; i < colorData.length; i += 4) {
+//     const r = colorData[i];
+//     const g = colorData[i + 1];
+//     const b = colorData[i + 2];
+//     const a = colorData[i + 3];
+//     pixels.push({ r, g, b, a } as Pixel);
+//   }
 
-  let PixelsByLine: Array<Pixel>[] = Array.from(
-    { length: resizedHeight },
-    () => [],
-  );
+//   let PixelsByLine: Array<Pixel>[] = Array.from(
+//     { length: resizedHeight },
+//     () => [],
+//   );
 
-  for (let y = 0; y < resizedHeight; y++) {
-    for (let x = 0; x < resizedWidth; x++) {
-      const pixel = pixels[y * resizedWidth + x]!;
-      if (pixel) {
-        PixelsByLine[y]!.push(pixel);
-      }
-    }
-  }
+//   for (let y = 0; y < resizedHeight; y++) {
+//     for (let x = 0; x < resizedWidth; x++) {
+//       const pixel = pixels[y * resizedWidth + x]!;
+//       if (pixel) {
+//         PixelsByLine[y]!.push(pixel);
+//       }
+//     }
+//   }
 
-  let maxLineLength = 0;
-  let lines: string[] = [];
+//   let maxLineLength = 0;
+//   let lines: string[] = [];
 
-  // Normal Output
-  for (let i = 0; i < PixelsByLine.length; i++) {
-    let textContent = '';
+//   // Normal Output
+//   for (let i = 0; i < PixelsByLine.length; i++) {
+//     let textContent = '';
 
-    const linePixels = PixelsByLine[i]!;
-    const pixelsMergedByColor = mergedPixels(linePixels);
-    for (let j = 0; j < pixelsMergedByColor.length; j++) {
-      const currentChunk = pixelsMergedByColor[j]!;
-      const firstPixel = currentChunk[0]!;
-      const colorHex = (
-        (firstPixel.r << 16) |
-        (firstPixel.g << 8) |
-        firstPixel.b
-      )
-        .toString(16)
-        .padStart(6, '0');
-      textContent += chunkTemplate
-        .replace('@color@', `#${colorHex.toLowerCase()}`)
-        .replace('@text@', '█'.repeat(currentChunk.length));
-    }
-    textContent = textContent.slice(0, -1); // Remove last comma
-    const currentLineCommand = commandTemplate
-      .replace('@text@', textContent)
-      .replace('@posY@', ((PixelsByLine.length - i) * lineHeight).toString())
-      .replace('@lineWidth@', (resizedWidth * widthNeededPerBlock).toString());
-    if (isGenerateWithLineCombinations) {
-      lines.push(
-        currentLineCommand.replaceAll('@posX@', blockLeading.toString()) + '\n',
-      );
-    }
-    lines.push(currentLineCommand.replaceAll('@posX@', '0') + '\n');
-    if (currentLineCommand.length > maxLineLength) {
-      maxLineLength = currentLineCommand.length;
-    }
-  }
+//     const linePixels = PixelsByLine[i]!;
+//     const pixelsMergedByColor = mergedPixels(linePixels);
+//     for (let j = 0; j < pixelsMergedByColor.length; j++) {
+//       const currentChunk = pixelsMergedByColor[j]!;
+//       const firstPixel = currentChunk[0]!;
+//       const colorHex = (
+//         (firstPixel.r << 16) |
+//         (firstPixel.g << 8) |
+//         firstPixel.b
+//       )
+//         .toString(16)
+//         .padStart(6, '0');
+//       textContent += chunkTemplate
+//         .replace('@color@', `#${colorHex.toLowerCase()}`)
+//         .replace('@text@', '█'.repeat(currentChunk.length));
+//     }
+//     textContent = textContent.slice(0, -1); // Remove last comma
+//     const currentLineCommand = commandTemplate
+//       .replace('@text@', textContent)
+//       .replace('@posY@', ((PixelsByLine.length - i) * lineHeight).toString())
+//       .replace('@lineWidth@', (resizedWidth * widthNeededPerBlock).toString());
+//     if (isGenerateWithLineCombinations) {
+//       lines.push(
+//         currentLineCommand.replaceAll('@posX@', blockLeading.toString()) + '\n',
+//       );
+//     }
+//     lines.push(currentLineCommand.replaceAll('@posX@', '0') + '\n');
+//     if (currentLineCommand.length > maxLineLength) {
+//       maxLineLength = currentLineCommand.length;
+//     }
+//   }
 
-  await Bun.write(`${outputDir}${prefix}output.mcfunction`, lines.join(''));
-}
+//   await Bun.write(`${outputDir}${prefix}output.mcfunction`, lines.join(''));
+// }
 
 export interface PixelGroup {
   x: number;

@@ -1,0 +1,13 @@
+export const commandTemplate =
+  'summon minecraft:text_display ~@posX@ ~@posY@ ~ {Tags:["video_frame"],text:[@text@],background:' +
+  '0x00ffffff' +
+  ',width:20000,line_width:@lineWidth@}';
+export const dataMergeCommandTemplate =
+  'data modify entity @e[type=minecraft:text_display,tag=video_frame,tag=@tag@,limit=1,sort=nearest] text set value [@text@]';
+export const chunkTemplate = '{text:"@text@",color:"@color@"},';
+export const bigChunkTemplate = '{text:"",color:"@color@",extra:[@inner@]},';
+export const chunkEntryTemplate = '{text:"@text@"@color@},';
+export const lineHeight = 0.2;
+export const blockLeading = 0.025;
+export const withPaddingLineHeight = 0.25;
+export const widthNeededPerBlock = 9;

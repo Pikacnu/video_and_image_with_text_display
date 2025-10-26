@@ -1,6 +1,5 @@
 import { $, Glob } from 'bun';
 import {
-  processImage,
   processImageWithLineCombinations,
   processImageWithCombinedLinesAndJsonOutput,
   type ImageProcessOptions,
@@ -41,6 +40,9 @@ async function generateVideoFunction(
     VideoModifyFactor = 1,
     isFillGaps = true,
   } = options;
+  const isUsingDataMergeCommand =
+    imageProcessOptions?.isUsingDataMergeCommand || false;
+
   console.log(`
     Generating video function with:
     Frame Rate: ${frameRate}
@@ -88,17 +90,25 @@ async function generateVideoFunction(
       .replaceAll('"', '')}`,
   );
   console.time('Processing frames into functions');
+  let entityDataList: [string, [number, number]][] = [];
   for (const file of files.slice(
     0,
     Math.floor(files.length * VideoModifyFactor),
   )) {
     const filePath = `${outputDir}/frames/${file}`;
-    await processImageWithLineCombinations(
+    const processResult = await processImageWithLineCombinations(
       filePath,
       `${outputDir}/function/frames/`,
       imageProcessOpts,
       `frame_${frameIndex}_`,
     );
+    if (
+      processResult &&
+      isUsingDataMergeCommand &&
+      entityDataList.length === 0
+    ) {
+      entityDataList = processResult;
+    }
     functionFiles.push(`frame_${frameIndex}_output.mcfunction`);
     frameIndex++;
   }
@@ -115,7 +125,28 @@ scoreboard players set current_frame video_system 0
 data merge storage video:data {data:{frameIndex:0}}
 scoreboard players set last_frame video_system ${lastFrameIndex}
 scoreboard players set video_playing video_system 0
-    `,
+${
+  !isUsingDataMergeCommand
+    ? ''
+    : entityDataList
+        .map(([tag, [x, y]]) => {
+          if (isFillGaps) {
+            return `summon minecraft:text_display ~${x} ~${y} ~ {Tags:["video_frame","${tag}"],text:'',background: 0x00ffffff,width:20000,line_width:200}
+summon minecraft:text_display ~${x} ~${
+              y - 0.05
+            } ~ {Tags:["video_frame","${tag}"],text:'',background: 0x00ffffff,width:20000,line_width:200}
+summon minecraft:text_display ~${
+              x + 0.025
+            } ~${y} ~ {Tags:["video_frame","${tag}"],text:'',background: 0x00ffffff,width:20000,line_width:200}
+summon minecraft:text_display ~${x + 0.025} ~${
+              y - 0.05
+            } ~ {Tags:["video_frame","${tag}"],text:'',background: 0x00ffffff,width:20000,line_width:200}`;
+          }
+          return `summon minecraft:text_display ~${x} ~${y} ~ {Tags:["video_frame","${tag}"],text:'',background: 0x00ffffff,width:20000,line_width:200}`;
+        })
+        .join('\n')
+})}
+`,
   );
 
   await Bun.write(
