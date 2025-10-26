@@ -3,7 +3,9 @@ import {
   processImage,
   processImageWithLineCombinations,
   processImageWithCombinedLinesAndJsonOutput,
+  type ImageProcessOptions,
   type ImageOutput,
+  ColorSize,
 } from './image';
 import { mkdir } from 'fs/promises';
 import { rmdir } from 'fs/promises';
@@ -14,18 +16,40 @@ export async function splitVideoIntoMessageByFrameRate(
   outputDir: string,
   frameRate: number,
 ) {
-  await $`ffmpeg -i ${inputPath} -r ${frameRate} ${outputDir}/frame%04d.png`;
+  await $`ffmpeg -i ${inputPath} -r ${frameRate} ${outputDir}/frame%04d.png`.quiet();
 }
+
+type VideoProcessOptions = {
+  frameRate?: number;
+  intervalBetweenFrames?: number;
+  frameResizeFactor?: number;
+  VideoModifyFactor?: number;
+  isFillGaps?: boolean;
+};
 
 async function generateVideoFunction(
   inputFilePath: string,
   outputDir: string,
   functionOutputDir: string,
-  frameRate: number,
-  intervalBetweenFrames: number,
-  frameResizeFactor: number,
-  VideoModifyFactor = 1,
+  options: VideoProcessOptions,
+  imageProcessOptions?: ImageProcessOptions,
 ) {
+  const {
+    frameRate = 20,
+    intervalBetweenFrames = 100,
+    frameResizeFactor = 1,
+    VideoModifyFactor = 1,
+    isFillGaps = true,
+  } = options;
+  console.log(`
+    Generating video function with:
+    Frame Rate: ${frameRate}
+    Interval Between Frames: ${intervalBetweenFrames}
+    Frame Resize Factor: ${frameResizeFactor}
+    Video Modify Factor: ${VideoModifyFactor}
+    Is Fill Gaps: ${isFillGaps}
+  `);
+
   if (existsSync(`${outputDir}/function`)) {
     await rmdir(`${outputDir}/function`, { recursive: true });
   }
@@ -36,15 +60,34 @@ async function generateVideoFunction(
   await mkdir(`${outputDir}/frames`, { recursive: true });
   await mkdir(`${functionOutputDir}/frames`, { recursive: true });
 
+  console.time('Splitting video into frames');
   await splitVideoIntoMessageByFrameRate(
     inputFilePath,
     `${outputDir}/frames`,
     frameRate,
   );
+  console.timeEnd('Splitting video into frames');
   const scanner = new Glob(`frame*.png`);
   const files = Array.from(scanner.scanSync(`${outputDir}/frames`));
   let frameIndex = 0;
   let functionFiles: string[] = [];
+  const imageProcessOpts = imageProcessOptions || {
+    resizeFactor: frameResizeFactor,
+    groupLineCount: 50,
+    isGenerateWithLineCombinations: false,
+    blockGroupThreshold: 100,
+    colorSize: ColorSize._256,
+  };
+
+  console.log(
+    `Processing ${Math.floor(files.length * VideoModifyFactor)} frames...`,
+  );
+  console.log(
+    `${JSON.stringify(imageProcessOpts, null, 4)
+      .slice(1, -1)
+      .replaceAll('"', '')}`,
+  );
+  console.time('Processing frames into functions');
   for (const file of files.slice(
     0,
     Math.floor(files.length * VideoModifyFactor),
@@ -53,15 +96,13 @@ async function generateVideoFunction(
     await processImageWithLineCombinations(
       filePath,
       `${outputDir}/function/frames/`,
-      frameResizeFactor,
-      50,
-      false,
+      imageProcessOpts,
       `frame_${frameIndex}_`,
-      100,
     );
     functionFiles.push(`frame_${frameIndex}_output.mcfunction`);
     frameIndex++;
   }
+  console.timeEnd('Processing frames into functions');
   rmdir(`${outputDir}/frames`, { recursive: true });
 
   const lastFrameIndex = frameIndex - 1;
@@ -98,9 +139,13 @@ execute if score video_playing video_system matches 0 run return run function vi
 scoreboard players add current_frame video_system 1
 execute store result storage video:data data.frameIndex int 1 run scoreboard players get current_frame video_system
 function video:run_video_frame with storage video:data data
-execute positioned ~ ~-0.05 ~ run function video:run_video_frame with storage video:data data
+${
+  isFillGaps
+    ? `execute positioned ~ ~-0.05 ~ run function video:run_video_frame with storage video:data data
 execute positioned ~0.025 ~-0.05 ~ run function video:run_video_frame with storage video:data data
-execute positioned ~0.025 ~ ~ run function video:run_video_frame with storage video:data data
+execute positioned ~0.025 ~ ~ run function video:run_video_frame with storage video:data data`
+    : ''
+}
 schedule function video:run_video ${intervalBetweenFrames}t
 `,
   );
@@ -126,9 +171,13 @@ scoreboard players set video_playing video_system 0
   await Bun.write(
     `${functionOutputDir}/run_frame.mcfunction`,
     `$function video:run_video_frame {frameIndex:$(i)}
-$execute positioned ~ ~-0.05 ~ run function video:run_video_frame {frameIndex:$(i)}
+    ${
+      isFillGaps
+        ? `$execute positioned ~ ~-0.05 ~ run function video:run_video_frame {frameIndex:$(i)}
 $execute positioned ~0.025 ~-0.05 ~ run function video:run_video_frame {frameIndex:$(i)}
-$execute positioned ~0.025 ~ ~ run function video:run_video_frame {frameIndex:$(i)}`,
+$execute positioned ~0.025 ~ ~ run function video:run_video_frame {frameIndex:$(i)}`
+        : ''
+    }`,
   );
 }
 
@@ -284,18 +333,28 @@ if (import.meta.main) {
   const inputFilePath = './bad-apple.mp4';
   const outputDir = './data/video';
   const functionOutputDir = `${outputDir}/function`;
-  const frameRate = 10;
+  const frameRate = 4;
   const intervalBetweenFrames = 20 / frameRate;
-  const frameResizeFactor = 0.5;
+  const frameResizeFactor = 0.05;
   const VideoModifyFactor = 1;
   await generateVideoFunction(
     inputFilePath,
     outputDir,
     functionOutputDir,
-    frameRate,
-    intervalBetweenFrames,
-    frameResizeFactor,
-    VideoModifyFactor,
+    {
+      frameRate,
+      intervalBetweenFrames,
+      frameResizeFactor,
+      VideoModifyFactor,
+      isFillGaps: false,
+    },
+    {
+      groupLineCount: 100,
+      isGenerateWithLineCombinations: false,
+      blockGroupThreshold: 200,
+      colorSize: ColorSize._256,
+      outputResizeFactor: 0.05,
+    },
   );
   // await generateVideoFunctionWithModify(
   // inputFilePath,

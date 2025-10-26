@@ -2,6 +2,29 @@ import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 export type Pixel = { r: number; g: number; b: number; a: number };
 
+export enum ColorSize {
+  _16 = 16,
+  _256 = 256,
+}
+
+function getColorString(
+  r: number,
+  g: number,
+  b: number,
+  colorSize: ColorSize,
+): string {
+  if (colorSize === ColorSize._16) {
+    const r16 = Math.round((r / 255) * 15);
+    const g16 = Math.round((g / 255) * 15);
+    const b16 = Math.round((b / 255) * 15);
+    return `#${((r16 << 8) | (g16 << 4) | b16).toString(16).padStart(3, '0')}`;
+  }
+  if (colorSize === ColorSize._256) {
+    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+  }
+  throw new Error('Unsupported color size');
+}
+
 const mergedPixels = (
   pixels: Pixel[],
   maxChunkLength = 2 ** 15 - 1,
@@ -41,15 +64,29 @@ const blockLeading = 0.025;
 const withPaddingLineHeight = 0.25;
 const widthNeededPerBlock = 9;
 
+export type ImageProcessOptions = {
+  resizeFactor?: number;
+  groupLineCount?: number;
+  isGenerateWithLineCombinations?: boolean;
+  blockGroupThreshold?: number;
+  colorSize?: ColorSize;
+  outputResizeFactor?: number;
+};
+
 export async function processImageWithLineCombinations(
   imagePath: string,
   outputDir: string,
-  resizeFactor: number,
-  groupLineCount: number,
-  isGenerateWithLineCombinations = false,
+  options: ImageProcessOptions,
   prefix = '',
-  BlockGroupThreshold = 150,
 ) {
+  const {
+    resizeFactor = 1,
+    groupLineCount = 50,
+    isGenerateWithLineCombinations = false,
+    blockGroupThreshold = 100,
+    colorSize = ColorSize._256,
+    outputResizeFactor = 1,
+  } = options;
   const image = await loadImage(await Bun.file(imagePath).arrayBuffer());
   const resizedWidth = Math.floor(image.width * resizeFactor);
   const resizedHeight = Math.floor(image.height * resizeFactor);
@@ -109,7 +146,7 @@ export async function processImageWithLineCombinations(
 
     const linePixels = pixelsGroupedByMultipleLines[i]!;
 
-    const pixelsMergedByColor = mergedPixels(linePixels);
+    const pixelsMergedByColor = mergedPixels(linePixels, blockGroupThreshold);
     // CombinedWithColorChunksByCheckCountOfColorInTheRange
     const [, combinedChunks] = pixelsMergedByColor.reduce(
       (source, currentChunk, index) => {
@@ -126,7 +163,7 @@ export async function processImageWithLineCombinations(
         });
         let target = '';
         for (const [color, count] of colorTableMap.entries()) {
-          if (count >= BlockGroupThreshold) {
+          if (count >= blockGroupThreshold) {
             target = color;
             break;
           }
@@ -187,7 +224,12 @@ export async function processImageWithLineCombinations(
                 '@color@',
                 color === `#${colorHex.toLowerCase()}`
                   ? ``
-                  : `,color:"#${colorHex.toLowerCase()}"`,
+                  : `,color:"${getColorString(
+                      firstPixel.r,
+                      firstPixel.g,
+                      firstPixel.b,
+                      colorSize,
+                    )}"`,
               )
               .replace('@text@', '█'.repeat(currentInnerChunk.length));
           }
@@ -197,16 +239,25 @@ export async function processImageWithLineCombinations(
 
     textContent = textContent.length > 0 ? textContent.slice(0, -1) : ''; // Remove last comma
 
-    const currentLineCommand = commandTemplate
+    const currentLineCommandTemp = commandTemplate
       .replace('@text@', textContent)
       .replace('@lineWidth@', (resizedWidth * widthNeededPerBlock).toString());
+    const currentLineCommand = `${currentLineCommandTemp.slice(
+      0,
+      -1,
+    )},scale:[${outputResizeFactor.toFixed(2)}f,${outputResizeFactor.toFixed(
+      2,
+    )},1f]}`;
     if (isGenerateWithLineCombinations) {
       const baseY =
         groupLineCount *
           withPaddingLineHeight *
-          (pixelsGroupedByMultipleLines.length - i - 1) +
+          (pixelsGroupedByMultipleLines.length - i - 1) *
+          outputResizeFactor +
         (i === pixelsGroupedByMultipleLines.length - 1
-          ? lastChunkBottomPaddingLines * withPaddingLineHeight
+          ? lastChunkBottomPaddingLines *
+            withPaddingLineHeight *
+            outputResizeFactor
           : 0);
 
       const filledVertical =
@@ -457,6 +508,12 @@ export async function processImageWithCombinedLinesAndJsonOutput(
 
 if (import.meta.main) {
   const outputDir = './data/display/function/';
-  await processImageWithLineCombinations('./img.jpg', outputDir, 0.1, 100);
+  await processImageWithLineCombinations('./img.jpg', outputDir, {
+    resizeFactor: 0.1,
+    groupLineCount: 20,
+    isGenerateWithLineCombinations: true,
+    blockGroupThreshold: 50,
+    colorSize: ColorSize._256,
+  });
   //await processImage('./img.jpg', outputDir, 0.1);
 }
