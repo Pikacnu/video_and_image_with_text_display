@@ -311,7 +311,7 @@ export async function processImageWithLineCombinations(
           [0, baseY],
           mostAppearedColor,
         ]);
-        if (isBackgroundTransparent) {
+        if (!isBackgroundTransparent) {
           lines.push(
             bgColorUpdateCommandTemplate
               .replace('@tag@', `video_frame_target_${i}`)

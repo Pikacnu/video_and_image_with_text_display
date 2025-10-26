@@ -371,7 +371,7 @@ scoreboard players set video_playing video_system 0
 }
 
 if (import.meta.main) {
-  const inputFilePath = './BGM_744326.mp4';
+  const inputFilePath = './bad-apple.mp4';
   const outputDir = './data/video';
   const functionOutputDir = `${outputDir}/function`;
   const frameRate = 20;
