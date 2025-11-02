@@ -11,3 +11,5 @@ export const lineHeight = 0.2;
 export const blockLeading = 0.025;
 export const withPaddingLineHeight = 0.25;
 export const widthNeededPerBlock = 9;
+export const deltaZ = 0.000001;
+export const fontSize = 9;

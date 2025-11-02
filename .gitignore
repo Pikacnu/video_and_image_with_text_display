@@ -39,5 +39,8 @@ refector
 generator
 output
 data/video/*
+data/display/*
 video_*
 *.mp4
+docs
+*.jpg
